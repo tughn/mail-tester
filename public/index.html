@@ -538,7 +538,7 @@
       }catch(e){}
     }
 
-    function calcScore(spf,dkim,dmarc,contentScore,mtaSts,tlsRpt){
+    function calcScore(spf,dkim,dmarc,contentScore,mtaSts,tlsRpt,urlReputation){
       const r=[spf,dkim,dmarc].map(x=>(x||'').toLowerCase());
       const pass=r.filter(x=>x==='pass').length;
       const soft=r.filter(x=>x==='softfail'||x==='neutral').length;
@@ -556,6 +556,9 @@
       score=Math.min(10,score+transportBonus);
       const cs=contentScore!==undefined?contentScore:100;
       if(cs<50)score=Math.max(0,score-1);
+      // Strict penalty for phishing/blacklisted URLs - cap at 4 max
+      const hasPhishing=urlReputation?.blacklisted?.length>0;
+      if(hasPhishing)score=Math.min(4,score);
       return Math.round(score*10)/10;
     }
     function getStatus(s){if(s>=9)return{status:'Excellent',hint:'Well configured',cls:'excellent'};if(s>=7)return{status:'Good',hint:'Minor improvements',cls:'good'};if(s>=4)return{status:'Fair',hint:'Needs attention',cls:'fair'};return{status:'Poor',hint:'Critical issues',cls:'poor'};}
@@ -688,7 +691,7 @@
       $('results-section').classList.remove('hidden');
       const spf=r.spf?.result||'none',dkim=r.dkim?.result||'none',dmarc=r.dmarc?.result||'none';
       const contentScore=r.content?.score??100;
-      const finalScore=calcScore(spf,dkim,dmarc,contentScore,r.mtaSts,r.tlsRpt);
+      const finalScore=calcScore(spf,dkim,dmarc,contentScore,r.mtaSts,r.tlsRpt,r.urlReputation);
       if(finalScore>=7){playSuccessSound();}else{playErrorSound();}
       updateScore(finalScore);
       displayTransportSecurity(r.mtaSts,r.tlsRpt);
@@ -725,9 +728,14 @@
       const details=[{l:'From',v:r.from},{l:'Subject',v:r.subject},{l:'Received',v:r.receivedAt?new Date(r.receivedAt).toLocaleTimeString():null}].filter(d=>d.v);
       $('details-row').innerHTML=details.map(d=>`<div class="detail-item"><span class="detail-label">${d.l}:</span><span class="detail-value">${esc(d.v)}</span></div>`).join('');
       $('raw-headers').textContent=r.rawHeaders||'No headers found';
-      if(authFail||content.rating==='spam'||content.rating==='likely_spam'){
+      const hasPhishingLinks=r.urlReputation?.blacklisted?.length>0;
+      if(hasPhishingLinks||authFail||content.rating==='spam'||content.rating==='likely_spam'){
         const mi=$('modal-icon');
-        if(content.rating==='spam'){
+        if(hasPhishingLinks){
+          mi.className='modal-icon error';
+          $('modal-title').textContent='Malicious URLs Detected';
+          $('modal-text').textContent='Your email contains links flagged as phishing or malware. This will severely impact deliverability and may be blocked entirely.';
+        }else if(content.rating==='spam'){
           mi.className='modal-icon error';
           $('modal-title').textContent='Spam Detected';
           $('modal-text').textContent='Your email contains spam patterns that will impact deliverability.';
@@ -745,7 +753,7 @@
     }
     function esc(t){const d=document.createElement('div');d.textContent=t;return d.innerHTML;}
 
-    $('share-btn').onclick=()=>{if(!lastResults)return;const spf=lastResults.spf?.result||'none',dkim=lastResults.dkim?.result||'none',dmarc=lastResults.dmarc?.result||'none';const cs=lastResults.content?.score??100;const score=calcScore(spf,dkim,dmarc,cs,lastResults.mtaSts,lastResults.tlsRpt);const mtaSts=lastResults.mtaSts?.configured?'Yes':'No';const tlsRpt=lastResults.tlsRpt?.configured?'Yes':'No';const urlStatus=lastResults.urlReputation?.blacklisted?.length>0?'Dangerous':lastResults.urlReputation?.checked>0?'Clean':'N/A';const txt=`Mail Test Score: ${score}/10\nSPF: ${spf.toUpperCase()} | DKIM: ${dkim.toUpperCase()} | DMARC: ${dmarc.toUpperCase()}\nMTA-STS: ${mtaSts} | TLS-RPT: ${tlsRpt} | URLs: ${urlStatus}\n\nTest yours: https://deliverabilityanalyzer.xyz`;if(navigator.share){navigator.share({title:'Mail Test Results',text:txt}).catch(()=>{});}else{navigator.clipboard.writeText(txt);showToast('Copied!');}};
+    $('share-btn').onclick=()=>{if(!lastResults)return;const spf=lastResults.spf?.result||'none',dkim=lastResults.dkim?.result||'none',dmarc=lastResults.dmarc?.result||'none';const cs=lastResults.content?.score??100;const score=calcScore(spf,dkim,dmarc,cs,lastResults.mtaSts,lastResults.tlsRpt,lastResults.urlReputation);const mtaSts=lastResults.mtaSts?.configured?'Yes':'No';const tlsRpt=lastResults.tlsRpt?.configured?'Yes':'No';const urlStatus=lastResults.urlReputation?.blacklisted?.length>0?'Dangerous':lastResults.urlReputation?.checked>0?'Clean':'N/A';const txt=`Mail Test Score: ${score}/10\nSPF: ${spf.toUpperCase()} | DKIM: ${dkim.toUpperCase()} | DMARC: ${dmarc.toUpperCase()}\nMTA-STS: ${mtaSts} | TLS-RPT: ${tlsRpt} | URLs: ${urlStatus}\n\nTest yours: https://deliverabilityanalyzer.xyz`;if(navigator.share){navigator.share({title:'Mail Test Results',text:txt}).catch(()=>{});}else{navigator.clipboard.writeText(txt);showToast('Copied!');}};
 
     $('headers-trigger').onclick=()=>{$('headers-trigger').classList.toggle('open');$('headers-content').classList.toggle('open');};
 
